@@ -49,10 +49,11 @@ We would like to express our gratitude to the authors of the following repositor
 If you find this work useful in your research, please consider citing: 
 
 ```bibtex
-@article{kang25latentunfold,
-  title={Flux Already Knows – Activating Subject-Driven Image Generation without Training},
-  author={Hao Kang, Stathi Fotiadis, Liming Jiang, Qing Yan, Yumin Jia, Zichuan Liu, Min Jin Chong, and Xin Lu},
-  journal={arXiv preprint arXiv: 2504.11478},
-  year={2025}
+@article{kang2025latentunfold,
+      title={Flux Already Knows - Activating Subject-Driven Image Generation without Training}, 
+      author={Kang, Hao and Fotiadis, Stathi and Jiang, Liming and Yan, Qing and Jia, Yumin and Liu, Zichuan and Chong, Min Jin  and Lu, Xin},
+      journal={arXiv preprint}, 
+      volume={arXiv:2504.11478}
+      year={2025},
 }
 ```
