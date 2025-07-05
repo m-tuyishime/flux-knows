@@ -1,0 +1,16 @@
+{
+  "name": "zero_imagen",
+  "dockerComposeFile": "docker-compose.yml",
+  "service": "zero_imagen",
+  "workspaceFolder": "/workspace",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "ms-toolsai.jupyter",
+        "esbenp.prettier-vscode",
+        "ms-toolsai.tensorboard"
+      ]
+    }
+  }
+}

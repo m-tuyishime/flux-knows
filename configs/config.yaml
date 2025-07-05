@@ -1,7 +1,10 @@
 base_model: "black-forest-labs/FLUX.1-dev"
 seg_model: "briaai/RMBG-2.0"
 gpt:
+  provider: "huggingface" # or "openai"
+  # For OpenAI, set the following:
   base_url: ""
   api_version: ""
   ak: ""
-  model_name: ""
+  # For Hugging Face, set the following:
+  model_name: "wnma3mz/Janus-Pro-7B-4bit"

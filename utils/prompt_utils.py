@@ -1,18 +1,18 @@
- '''
- Copyright (c) 2024 Bytedance Ltd. and/or its affiliates
+'''
+Copyright (c) 2024 Bytedance Ltd. and/or its affiliates
 
- Licensed under the Apache License, Version 2.0 (the "License");
- you may not use this file except in compliance with the License.
- You may obtain a copy of the License at
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
 
-     http://www.apache.org/licenses/LICENSE-2.0
+    http://www.apache.org/licenses/LICENSE-2.0
 
- Unless required by applicable law or agreed to in writing, software
- distributed under the License is distributed on an "AS IS" BASIS,
- WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- See the License for the specific language governing permissions and
- limitations under the License.
- '''
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+'''
  
 import yaml
 import openai
@@ -21,6 +21,9 @@ import io
 import json
 import os
 from tenacity import retry, stop_after_attempt, wait_random_exponential
+import torch
+from PIL import Image
+from transformers import AutoModelForCausalLM, AutoProcessor
 
 client = None
 gpt_config = {}
@@ -32,25 +35,43 @@ def load_gpt_config_from_file(cfg_file="configs/config.yaml"):
         gpt_config = config['gpt']
 
 
-def setup_gpt_config(base_url, api_version, ak, model_name):
+def setup_gpt_config(model_name, provider, base_url=None, api_version=None, ak=None):
     global gpt_config
     global client
     gpt_config["base_url"] = base_url
     gpt_config["api_version"] = api_version
     gpt_config["ak"] = ak
     gpt_config["model_name"] = model_name
+    gpt_config["provider"] = provider
     client = None
 
 
 def init_client():
-    base_url = gpt_config['base_url']
-    api_version = gpt_config['api_version']
-    ak = gpt_config['ak']
-    client = openai.AzureOpenAI(
-        azure_endpoint=base_url,
-        api_version=api_version,
-        api_key=ak,
-    )
+    global client, gpt_config
+    provider = gpt_config.get('provider', 'openai')
+
+    if provider == 'openai':
+        base_url = gpt_config['base_url']
+        api_version = gpt_config['api_version']
+        ak = gpt_config['ak']
+        client = openai.AzureOpenAI(
+            azure_endpoint=base_url,
+            api_version=api_version,
+            api_key=ak,
+        )
+    else:
+        model_name = gpt_config['model_name']
+        chat_processor = AutoProcessor.from_pretrained(model_name, trust_remote_code=True)
+        model = AutoModelForCausalLM.from_pretrained(
+            model_name,
+            device_map="auto",
+            trust_remote_code=True,
+        )
+        model.eval()
+        client = {
+            "processor": chat_processor,
+            "model": model,
+        }
     return client
 
 
@@ -60,13 +81,6 @@ def gpt(image):
     if not client:
         load_gpt_config_from_file(cfg_file="configs/config.yaml") # TODO
         client = init_client()
-    model_name = gpt_config['model_name']
-    max_tokens = 4096  
-    temperature = 0.0
-
-    buffered = io.BytesIO()
-    image.save(buffered, format="JPEG")
-    encoded_image = base64.b64encode(buffered.getvalue()).decode("utf-8")
 
     system_prompt = f"""
             When given an image, you make a mosaic image consisting of a 3x3 grid of sub-images showing the exact same subject, describe each subject's appearance in sub-images sequentially from top-left to bottom-right. 
@@ -117,21 +131,47 @@ def gpt(image):
             Please describe the uploaded image, and return the result in json format.
             Please only return the plain json content without any contextual words, like ```json.
         """
+    
+    if gpt_config['provider'] == 'openai':
+        content = _gpt_openai(image, system_prompt)
+    else:
+        content = _gpt_huggingface(image, system_prompt)
+
+    # Post processing
+    content = content.strip()
+    if content.startswith("```json"):
+        content = content[7:]
+    if content.endswith("```"):
+        content = content[:-3]
+
+    image_info = json.loads(content)
+    assert "row1" in image_info and "row2" in image_info and "row3" in image_info and "summary" in image_info, "gpt response format error"
+    assert "image1" in image_info["row1"] and "image2" in image_info["row1"] and "image3" in image_info["row1"], "gpt response format error"
+    assert "image1" in image_info["row2"] and "image2" in image_info["row2"] and "image3" in image_info["row2"], "gpt response format error"
+    assert "image1" in image_info["row3"] and "image2" in image_info["row3"] and "image3" in image_info["row3"], "gpt response format error"
+    return image_info
+
+def _gpt_openai(image, system_prompt):
+    global client, gpt_config
+    model_name = gpt_config['model_name']
+    max_tokens = 4096
+    temperature = 0.0
+
+    buffered = io.BytesIO()
+    image.save(buffered, format="JPEG")
+    encoded_image = base64.b64encode(buffered.getvalue()).decode("utf-8")
+
     completion = client.chat.completions.create(
         model=model_name,
-        messages=
-        [
-            {
-                "role": "system",
-                "content": system_prompt
-            },
+        messages=[
+            { "role": "system", "content": system_prompt },
             {
                 "role": "user",
                 "content": [
                     {
-                    "type": "image_url",
-                    "image_url": {
-                        "url": f"data:image/jpeg;base64,{encoded_image}"
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:image/jpeg;base64, {encoded_image}"
                         }
                     }
                 ]
@@ -139,16 +179,32 @@ def gpt(image):
         ],
         temperature=temperature,
         max_tokens=max_tokens,
-        # extra_headers=gpt_config['extra_headers'],
     )
-
     result_json = completion.model_dump_json()
     result_json = json.loads(result_json)
+    return result_json["choices"][0]["message"]["content"]
 
-    content = result_json["choices"][0]["message"]["content"]
-    image_info = json.loads(content)
-    assert "row1" in image_info and "row2" in image_info and "row3" in image_info and "summary" in image_info, "gpt response format error"
-    assert "image1" in image_info["row1"] and "image2" in image_info["row1"] and "image3" in image_info["row1"], "gpt response format error"
-    assert "image1" in image_info["row2"] and "image2" in image_info["row2"] and "image3" in image_info["row2"], "gpt response format error"
-    assert "image1" in image_info["row3"] and "image2" in image_info["row3"] and "image3" in image_info["row3"], "gpt response format error"
-    return image_info
+def _gpt_huggingface(image, system_prompt):
+    global client
+    processor = client["processor"]
+    model = client["model"]
+
+    torch.cuda.empty_cache()
+
+    inputs = processor(
+        text=system_prompt,
+        images=image,
+        return_tensors="pt"
+    ).to(model.device)
+
+    with torch.inference_mode():
+        generation_kwargs = dict(
+            **inputs,
+            max_new_tokens=512,
+            temperature=0.0,
+            do_sample=False
+        )
+
+        outputs = model.generate(**generation_kwargs)
+
+    return processor.batch_decode(outputs, skip_special_tokens=True)[0]
