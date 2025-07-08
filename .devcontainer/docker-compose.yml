@@ -1,13 +1,9 @@
-version: "3.8"
 name: zero_imagen
 services:
   zero_imagen:
     build:
       context: ..
       dockerfile: .devcontainer/Dockerfile
-    volumes:
-      - ..:/workspace
-    entrypoint:
-      - sleep
-      - infinity
+    env_file:
+      - ../.env
     gpus: all

@@ -1,31 +1,37 @@
-FROM nvidia/cuda:12.1.1-cudnn8-devel-ubuntu20.04
+FROM nvidia/cuda:12.9.1-cudnn-devel-ubuntu24.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-WORKDIR /workspace
-
-COPY . .
-
-# Install wget, git, gcc, and development libraries
+# Install dependencies as root
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     build-essential \
-    python3.9 \
     python3-pip \
-    python3.9-dev \
+    python3-venv \
+    openssh-server \
+    sudo \
     && rm -rf /var/lib/apt/lists/*
 
-# set python3.9 as default python
-RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.9 1
+# Create and set up a Python virtual environment
+RUN python3 -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
 
-# set python3.9 as default pip
-RUN update-alternatives --install /usr/bin/pip pip /usr/bin/pip3 1
+RUN pip install --upgrade pip 
 
-# set up pip
-RUN pip install --upgrade pip
+# Configure SSH
+# Create the directory for the SSH server to run
+RUN mkdir -p /var/run/sshd 
 
-# install dependencies
-RUN pip install -r requirements.txt
+# Disable password authentication for security, allow only key-based auth
+RUN sed -i 's/#PasswordAuthentication yes/PasswordAuthentication no/' /etc/ssh/sshd_config && \
+    sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin prohibit-password/' /etc/ssh/sshd_config
 
-# Login to Hugging Face
-RUN huggingface-cli login --token $HF_TOKEN
+# Copy the entrypoint script and make it executable
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+# expose SSH port
+EXPOSE 22
+
+# Set the entrypoint
+ENTRYPOINT ["/entrypoint.sh"]
