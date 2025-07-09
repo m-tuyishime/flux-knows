@@ -17,3 +17,5 @@ gradio
 protobuf
 bitsandbytes
 pillow
+pytest
+janus@git+https://github.com/deepseek-ai/Janus.git

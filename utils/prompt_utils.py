@@ -23,7 +23,8 @@ import os
 from tenacity import retry, stop_after_attempt, wait_random_exponential
 import torch
 from PIL import Image
-from transformers import AutoModelForCausalLM, AutoProcessor
+from janus.models import MultiModalityCausalLM, VLChatProcessor
+from janus.utils.io import load_pil_images
 
 client = None
 gpt_config = {}
@@ -61,13 +62,12 @@ def init_client():
         )
     else:
         model_name = gpt_config['model_name']
-        chat_processor = AutoProcessor.from_pretrained(model_name, trust_remote_code=True)
-        model = AutoModelForCausalLM.from_pretrained(
+        chat_processor = VLChatProcessor.from_pretrained(model_name, trust_remote_code=True)
+        model = MultiModalityCausalLM.from_pretrained(
             model_name,
-            device_map="auto",
             trust_remote_code=True,
-        )
-        model.eval()
+            use_safetensors=True,
+        ).eval() 
         client = {
             "processor": chat_processor,
             "model": model,
@@ -188,23 +188,49 @@ def _gpt_huggingface(image, system_prompt):
     global client
     processor = client["processor"]
     model = client["model"]
+    tokenizer = processor.tokenizer
 
     torch.cuda.empty_cache()
 
-    inputs = processor(
-        text=system_prompt,
-        images=image,
-        return_tensors="pt"
+    buf = io.BytesIO()
+    image.save(buf, format="JPEG")
+    data = base64.b64encode(buf.getvalue()).decode("utf-8")
+    uri = f"data:image/jpeg;base64,{data}"
+
+    conversation = [
+        {
+            "role": "User",
+            "content": f"<image_placeholder>\n{system_prompt}",
+            "images": [uri]
+        },
+        {
+            "role": "Assistant",
+            "content": ""
+        }
+    ]
+
+    pil_images = load_pil_images(conversation)
+
+    prepare_inputs = processor(
+        conversations=conversation,
+        images=pil_images,
+        force_batchify=True
     ).to(model.device)
+
+    inputs_embeds = model.prepare_inputs_embeds(**prepare_inputs)
 
     with torch.inference_mode():
         generation_kwargs = dict(
-            **inputs,
+            inputs_embeds=inputs_embeds,
+            attention_mask=prepare_inputs.attention_mask,
+            pad_token_id=processor.tokenizer.eos_token_id,
+            bos_token_id=processor.tokenizer.bos_token_id,
+            eos_token_id=processor.tokenizer.eos_token_id,
             max_new_tokens=512,
-            temperature=0.0,
-            do_sample=False
+            do_sample=False,
+            use_cache=True,
         )
 
         outputs = model.generate(**generation_kwargs)
 
-    return processor.batch_decode(outputs, skip_special_tokens=True)[0]
+    return tokenizer.decode(outputs[0].cpu().tolist(), skip_special_tokens=True)

@@ -7,4 +7,4 @@ gpt:
   api_version: ""
   ak: ""
   # For Hugging Face, set the following:
-  model_name: "wnma3mz/Janus-Pro-7B-4bit"
+  model_name: "deepseek-ai/Janus-Pro-1B"
