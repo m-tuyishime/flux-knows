@@ -23,6 +23,7 @@ import os
 from tenacity import retry, stop_after_attempt, wait_random_exponential
 import torch
 from PIL import Image
+from transformers import AutoModelForCausalLM
 from janus.models import MultiModalityCausalLM, VLChatProcessor
 from janus.utils.io import load_pil_images
 
@@ -63,11 +64,12 @@ def init_client():
     else:
         model_name = gpt_config['model_name']
         chat_processor = VLChatProcessor.from_pretrained(model_name, trust_remote_code=True)
-        model = MultiModalityCausalLM.from_pretrained(
+        model = AutoModelForCausalLM.from_pretrained(
             model_name,
             trust_remote_code=True,
             use_safetensors=True,
-        ).eval() 
+            torch_dtype=torch.bfloat16,
+        ).cuda().eval() 
         client = {
             "processor": chat_processor,
             "model": model,
@@ -231,6 +233,6 @@ def _gpt_huggingface(image, system_prompt):
             use_cache=True,
         )
 
-        outputs = model.generate(**generation_kwargs)
+        outputs = model.language_model.generate(**generation_kwargs)
 
     return tokenizer.decode(outputs[0].cpu().tolist(), skip_special_tokens=True)
